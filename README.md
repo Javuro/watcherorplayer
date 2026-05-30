@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Watcher or Player
 
-## Getting Started
+Watcher or Player is the first campaign app for JAVURO: a wallet-first Proof-of-Presence arena for the AI era.
 
-First, run the development server:
+The project starts as a Genesis Claim and participation loop, not as the full JAVURO app. The first job is to create verified wallets, distribute a small amount of JXRO, collect repeat participation data, and turn Player proof logs into content Watchers can consume.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## V1 Scope
+
+- Connect or create a wallet.
+- Choose a city.
+- Choose a role: Watcher or Player.
+- Claim the First Signal reward.
+- Complete daily actions for Signal Points.
+- Let Players submit Proof Logs.
+- Let Watchers judge Proof Logs as Real or Noise.
+- Track referrals, streaks, city activity, and snapshot eligibility.
+
+## Reward Model
+
+Initial public phase:
+
+- First Signal Claim: 100 JXRO, once per wallet.
+- Phase 1 cap: first 10,000 wallets.
+- Total Phase 1 JXRO pool: 1,000,000 JXRO.
+- Daily Watcher, Daily Player, Proof Log, and referral actions start as Signal Points.
+
+Later expansion:
+
+- Daily Watcher: 1 JXRO.
+- Daily Player: 3 JXRO.
+- Verified Proof: +7 JXRO.
+- 7-Day Streak: +20 JXRO.
+
+## Product Loop
+
+```text
+Enter Arena
+-> Connect/Create Wallet
+-> Choose City
+-> Choose Watcher or Player
+-> Claim First Signal
+-> Receive 100 JXRO
+-> Daily Signal / Proof Log / Invite
+-> Signal Points
+-> Snapshot Eligibility
+-> JAVURO Founder Layer
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Technical Direction
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- App: Next.js, TypeScript, Tailwind CSS.
+- Database and storage: Supabase.
+- Wallets and Web3 UX: thirdweb embedded wallet plus external wallet support.
+- Chain: BNB Smart Chain.
+- Token: JXRO BEP-20.
+- V1 distribution: backend-verified Reward Wallet transfers.
+- Later distribution: claim contract with signed vouchers.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Safety Rules
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Never place the treasury private key on the server.
+- Use a separate Reward Wallet funded only with campaign-sized amounts.
+- Enforce wallet, IP, device, campaign, and daily caps.
+- Keep admin pause controls available.
+- Store reward transaction hashes and claim state.
