@@ -15,6 +15,17 @@ The project starts as a Genesis Claim and participation loop, not as the full JA
 - Let Watchers judge Proof Logs as Real or Noise.
 - Track referrals, streaks, city activity, and snapshot eligibility.
 
+## Current Implementation
+
+- Next.js app shell.
+- Campaign constants and reward rules.
+- City and role selection UI.
+- Local mock wallet generation.
+- Local First Signal claim state.
+- Mock transaction hash display.
+
+This lets the team test the product loop before connecting thirdweb, Supabase, and the Reward Wallet.
+
 ## Reward Model
 
 Initial public phase:
@@ -56,6 +67,10 @@ Enter Arena
 - V1 distribution: backend-verified Reward Wallet transfers.
 - Later distribution: claim contract with signed vouchers.
 
+## Map Provider
+
+The Map tab uses MapLibre GL JS with globe projection and a keyless OpenFreeMap light style. It supports Earth-to-city zoom and city signal markers without an API key. Review tile capacity and service terms before public launch, then replace the style URL if a dedicated production provider is required.
+
 ## Safety Rules
 
 - Never place the treasury private key on the server.
@@ -63,3 +78,12 @@ Enter Arena
 - Enforce wallet, IP, device, campaign, and daily caps.
 - Keep admin pause controls available.
 - Store reward transaction hashes and claim state.
+
+## Next Build Order
+
+1. Add thirdweb wallet connection and replace mock wallet generation.
+2. Add Supabase tables for users, city selections, roles, rewards, proof logs, and referrals.
+3. Move local First Signal state into Supabase.
+4. Add backend reward engine with dry-run mode.
+5. Add Reward Wallet transfers on BNB Chain for First Signal claims.
+6. Add admin pause, caps, and manual claim review.
