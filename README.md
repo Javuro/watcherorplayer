@@ -1,6 +1,6 @@
 # Watcher or Player
 
-Watcher or Player is the first campaign app for JAVURO: a wallet-first Proof-of-Presence arena for the AI era.
+Watcher or Player is the first campaign app for JAVURO: a Proof-of-Presence arena for the AI era.
 
 The project starts as a Genesis Claim and participation loop, not as the full JAVURO app. The first job is to create verified wallets, distribute a small amount of JXRO, collect repeat participation data, and turn Player proof logs into content Watchers can consume.
 
@@ -17,14 +17,43 @@ The project starts as a Genesis Claim and participation loop, not as the full JA
 
 ## Current Implementation
 
-- Next.js app shell.
-- Campaign constants and reward rules.
+- Next.js 16 app shell and MapLibre signal globe.
+- Google authentication with Firebase Authentication.
+- Opaque, hashed server sessions stored in PostgreSQL.
+- PostgreSQL data model with Prisma.
+- Admin-only account registry at `/admin`.
+- Database models for users, wallets, claims, proofs, and reactions.
 - City and role selection UI.
-- Local mock wallet generation.
-- Local First Signal claim state.
-- Mock transaction hash display.
+- Automatic removal of the previous browser-only mock state.
 
-This lets the team test the product loop before connecting thirdweb, Supabase, and the Reward Wallet.
+Wallet linking, image storage, and token transfers are intentionally not active yet.
+The interface never creates a fake wallet or fake transaction hash.
+
+## Local Setup
+
+Copy `.env.example` to `.env.local`, then provide:
+
+- `DATABASE_URL`: Railway PostgreSQL connection string.
+- `ADMIN_EMAILS`: comma-separated Google accounts allowed to open `/admin`.
+- `NEXT_PUBLIC_FIREBASE_*`: Firebase web app configuration values.
+
+Apply the schema and start the app:
+
+```bash
+npm run db:deploy
+npm run dev
+```
+
+Enable the Google provider in Firebase Authentication and add the production
+host to Firebase Authorized domains. A custom Firebase action domain such as
+`auth.javuro.com` can be added later; the default Firebase action URL works for
+the MVP.
+
+Add the same variables to the Railway service. Link a Railway PostgreSQL
+service so `DATABASE_URL` is available. The production start command applies
+pending Prisma migrations automatically. The browser sends a Firebase ID token to the app,
+the server verifies it with Firebase, and then issues its own HttpOnly session
+cookie. Raw server session tokens are never stored in the database.
 
 ## Reward Model
 
@@ -60,8 +89,11 @@ Enter Arena
 ## Technical Direction
 
 - App: Next.js, TypeScript, Tailwind CSS.
-- Database and storage: Supabase.
-- Wallets and Web3 UX: thirdweb embedded wallet plus external wallet support.
+- Authentication: Firebase Authentication with Google sign-in.
+- App session: hashed opaque session tokens in PostgreSQL.
+- Database: Railway PostgreSQL with Prisma.
+- Image storage: Cloudflare R2 or an S3-compatible service.
+- Wallets and Web3 UX: wagmi, viem, and RainbowKit.
 - Chain: BNB Smart Chain.
 - Token: JXRO BEP-20.
 - V1 distribution: backend-verified Reward Wallet transfers.
@@ -81,9 +113,10 @@ The Map tab uses MapLibre GL JS with globe projection and a keyless OpenFreeMap 
 
 ## Next Build Order
 
-1. Add thirdweb wallet connection and replace mock wallet generation.
-2. Add Supabase tables for users, city selections, roles, rewards, proof logs, and referrals.
-3. Move local First Signal state into Supabase.
-4. Add backend reward engine with dry-run mode.
-5. Add Reward Wallet transfers on BNB Chain for First Signal claims.
-6. Add admin pause, caps, and manual claim review.
+1. Add Railway PostgreSQL and Firebase environment variables.
+2. Link Railway PostgreSQL and run `npm run db:deploy`.
+3. Add BNB Chain wallet connection and signed ownership verification.
+4. Save role and city selections to the authenticated user record.
+5. Add R2 image upload and database-backed Signal feed.
+6. Add the claim ledger and admin approval flow.
+7. Add Reward Wallet transfers on BNB Chain after dry-run verification.

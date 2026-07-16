@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ArenaRole {
+  WATCHER
+  PLAYER
+}
+
+enum ClaimStatus {
+  PENDING
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum ProofStatus {
+  PENDING
+  PUBLISHED
+  HIDDEN
+  REJECTED
+}
+
+enum ReactionKind {
+  REAL
+  NOISE
+}
+
+model User {
+  id            String     @id @default(cuid())
+  firebaseUid   String     @unique
+  authProvider  String     @default("firebase")
+  name          String?
+  email         String?    @unique
+  emailVerified DateTime?
+  image         String?
+  role          ArenaRole?
+  cityName      String?
+  countryCode   String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  sessions      Session[]
+  wallets       Wallet[]
+  claims        Claim[]
+  proofs        Proof[]
+  reactions     Reaction[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expires   DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expires])
+}
+
+model Wallet {
+  id         String    @id @default(cuid())
+  address    String    @unique
+  chainId    Int       @default(56)
+  userId     String
+  isPrimary  Boolean   @default(true)
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  claims     Claim[]
+
+  @@index([userId])
+}
+
+model Claim {
+  id              String      @id @default(cuid())
+  campaignKey     String
+  amount          Decimal     @db.Decimal(36, 18)
+  status          ClaimStatus @default(PENDING)
+  userId          String
+  walletId        String
+  transactionHash String?     @unique
+  reviewedAt      DateTime?
+  paidAt          DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet          Wallet      @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@unique([campaignKey, walletId])
+  @@index([status, createdAt])
+  @@index([userId])
+}
+
+model Proof {
+  id          String      @id @default(cuid())
+  userId      String
+  cityName    String
+  countryCode String?
+  caption     String      @db.VarChar(160)
+  imageUrl    String
+  capturedAt  DateTime
+  status      ProofStatus @default(PENDING)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reactions   Reaction[]
+
+  @@index([status, createdAt])
+  @@index([cityName, createdAt])
+  @@index([userId])
+}
+
+model Reaction {
+  id        String       @id @default(cuid())
+  userId    String
+  proofId   String
+  kind      ReactionKind
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  proof     Proof        @relation(fields: [proofId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, proofId])
+  @@index([proofId, kind])
+}

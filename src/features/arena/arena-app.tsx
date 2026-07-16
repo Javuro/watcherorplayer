@@ -3,20 +3,21 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  GoogleAuthProvider,
+  getRedirectResult,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut as signOutFromFirebase,
+  type User as FirebaseUser,
+} from "firebase/auth";
+import { firebaseAuth } from "@/lib/firebase-client";
 import { type ArenaRole, campaignStats, cities } from "./campaign";
 import { MapLibreSignalGlobe } from "./components/maplibre-signal-globe";
 import {
   type ArenaState,
   type ProofLog,
-  clearArenaState,
-  clearProofLogs,
-  createLocalId,
-  createLocalTxHash,
-  createLocalWalletAddress,
-  loadArenaState,
-  loadProofLogs,
-  saveArenaState,
-  saveProofLogs,
+  clearLegacyMockData,
   shortenAddress,
 } from "./storage";
 
@@ -26,9 +27,15 @@ type OnboardingStep =
   | "role"
   | "location"
   | "manualCity"
-  | "wallet"
-  | "claim"
+  | "account"
   | "done";
+
+export type AuthViewer = {
+  email: string;
+  image: string | null;
+  isAdmin: boolean;
+  name: string;
+};
 
 const roleOptions: Record<
   ArenaRole,
@@ -50,46 +57,148 @@ const stepOrder: OnboardingStep[] = [
   "intro",
   "role",
   "location",
-  "wallet",
-  "claim",
+  "account",
   "done",
 ];
 
 const cityDetectionRadiusKm = 80;
+const firebaseReturnUrlKey = "watcher-or-player:firebase-return";
 
-export function ArenaApp() {
+async function establishServerSession(
+  firebaseUser: FirebaseUser,
+  returnUrl: string,
+) {
+  const idToken = await firebaseUser.getIdToken(true);
+  const response = await fetch("/api/auth/firebase/session", {
+    body: JSON.stringify({ idToken }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(payload?.error ?? "The account session could not be created.");
+  }
+
+  const safeReturnUrl =
+    returnUrl.startsWith("/") && !returnUrl.startsWith("//")
+      ? returnUrl
+      : "/?continue=account";
+  window.location.assign(safeReturnUrl);
+}
+
+function getFirebaseErrorCode(error: unknown) {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    return error.code;
+  }
+
+  return "";
+}
+
+export function ArenaApp({
+  authReady,
+  viewer,
+}: {
+  authReady: boolean;
+  viewer: AuthViewer | null;
+}) {
   const [arenaState, setArenaState] = useState<ArenaState | null>(null);
   const [walletAddress, setWalletAddress] = useState("");
   const [selectedRole, setSelectedRole] = useState<ArenaRole>("player");
   const [selectedCityId, setSelectedCityId] = useState(cities[0].id);
   const [step, setStep] = useState<OnboardingStep>("intro");
   const [activeTab, setActiveTab] = useState<AppTab>("arena");
-  const [isClaiming, setIsClaiming] = useState(false);
   const [isFindingArena, setIsFindingArena] = useState(false);
   const [locationMessage, setLocationMessage] = useState("");
   const [proofLogs, setProofLogs] = useState<ProofLog[]>([]);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState("");
+
+  useEffect(() => {
+    if (!authReady || viewer) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void getRedirectResult(firebaseAuth)
+      .then(async (result) => {
+        if (!result || cancelled) {
+          return;
+        }
+
+        setIsSigningIn(true);
+        const returnUrl =
+          window.sessionStorage.getItem(firebaseReturnUrlKey) ??
+          "/?continue=account";
+        window.sessionStorage.removeItem(firebaseReturnUrlKey);
+        await establishServerSession(result.user, returnUrl);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        setIsSigningIn(false);
+        setSignInError(
+          error instanceof Error
+            ? error.message
+            : "Google sign-in could not be completed.",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, viewer]);
 
   useEffect(() => {
     const hydrateTimer = window.setTimeout(() => {
-      const savedState = loadArenaState();
+      clearLegacyMockData();
 
-      if (savedState) {
-        setArenaState(savedState);
-        setWalletAddress(savedState.walletAddress);
-        setSelectedRole(savedState.role);
-        setSelectedCityId(savedState.cityId);
+      const params = new URLSearchParams(window.location.search);
+      const continueTo = params.get("continue");
+      const role = params.get("role");
+      const cityId = params.get("city");
+      const city = cities.find((item) => item.id === cityId);
 
-        if (savedState.firstSignalClaimed) {
-          setStep("done");
-          setActiveTab("map");
-        }
+      if (role === "watcher" || role === "player") {
+        setSelectedRole(role);
       }
 
-      setProofLogs(loadProofLogs());
+      if (city) {
+        setSelectedCityId(city.id);
+      }
+
+      if (continueTo === "account") {
+        setStep("account");
+        setActiveTab("arena");
+
+        if (viewer && (role === "watcher" || role === "player") && city) {
+          void fetch("/api/profile", {
+            body: JSON.stringify({
+              cityName: city.name,
+              countryCode: city.region,
+              role,
+            }),
+            headers: { "Content-Type": "application/json" },
+            method: "PATCH",
+          });
+        }
+
+        window.history.replaceState({}, "", window.location.pathname);
+      }
     }, 0);
 
     return () => window.clearTimeout(hydrateTimer);
-  }, []);
+  }, [viewer]);
 
   const selectedCity = useMemo(
     () => cities.find((city) => city.id === selectedCityId) ?? cities[0],
@@ -109,16 +218,10 @@ export function ArenaApp() {
     goToStep("location");
   }
 
-  function handleConnectWallet() {
-    const nextWallet = walletAddress || createLocalWalletAddress();
-    setWalletAddress(nextWallet);
-    goToStep("claim");
-  }
-
   function handleManualCitySelect(cityId: string) {
     setSelectedCityId(cityId);
     setLocationMessage("Arena selected manually. Exact location remains hidden.");
-    goToStep("wallet");
+    goToStep("account");
   }
 
   function handleFindArena() {
@@ -144,7 +247,7 @@ export function ArenaApp() {
             `Arena found: ${nearestCity.name}. Exact location hidden.`,
           );
           setIsFindingArena(false);
-          goToStep("wallet");
+          goToStep("account");
           return;
         }
 
@@ -167,91 +270,65 @@ export function ArenaApp() {
     );
   }
 
-  async function handleClaim() {
-    const connectedWallet = walletAddress || createLocalWalletAddress();
-
-    if (!walletAddress) {
-      setWalletAddress(connectedWallet);
+  async function handleGoogleSignIn() {
+    if (!authReady || isSigningIn) {
+      return;
     }
 
-    setIsClaiming(true);
-    await new Promise((resolve) => setTimeout(resolve, 550));
+    const returnUrl = `/?continue=account&role=${selectedRole}&city=${selectedCityId}`;
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    setIsSigningIn(true);
+    setSignInError("");
 
-    const nextState: ArenaState = {
-      walletAddress: connectedWallet,
-      cityId: selectedCityId,
-      role: selectedRole,
-      firstSignalClaimed: true,
-      claimedAt: new Date().toISOString(),
-      txHash: createLocalTxHash(),
-    };
+    try {
+      const result = await signInWithPopup(firebaseAuth, provider);
+      await establishServerSession(result.user, returnUrl);
+    } catch (error: unknown) {
+      const code = getFirebaseErrorCode(error);
 
-    saveArenaState(nextState);
-    setArenaState(nextState);
-    setIsClaiming(false);
-    setStep("done");
-    setActiveTab("map");
-  }
-
-  function handleSubmitProof(imageDataUrl: string, caption: string) {
-    const connectedWallet = walletAddress || createLocalWalletAddress();
-
-    if (!walletAddress) {
-      setWalletAddress(connectedWallet);
-    }
-
-    const nextLog: ProofLog = {
-      id: createLocalId("proof"),
-      walletAddress: connectedWallet,
-      cityName: selectedCity.name,
-      role: "player",
-      caption,
-      imageDataUrl,
-      createdAt: new Date().toISOString(),
-      real: 0,
-      noise: 0,
-    };
-    const nextLogs = [nextLog, ...proofLogs];
-
-    saveProofLogs(nextLogs);
-    setProofLogs(nextLogs);
-    setSelectedRole("player");
-    setActiveTab("feed");
-  }
-
-  function handleReactToProof(logId: string, reaction: "real" | "noise") {
-    const nextLogs = proofLogs.map((log) => {
-      if (log.id !== logId) {
-        return log;
+      if (
+        code === "auth/popup-blocked" ||
+        code === "auth/operation-not-supported-in-this-environment"
+      ) {
+        window.sessionStorage.setItem(firebaseReturnUrlKey, returnUrl);
+        await signInWithRedirect(firebaseAuth, provider);
+        return;
       }
 
-      const hadReal = log.reaction === "real" ? 1 : 0;
-      const hadNoise = log.reaction === "noise" ? 1 : 0;
-
-      return {
-        ...log,
-        real: Math.max(0, log.real - hadReal) + (reaction === "real" ? 1 : 0),
-        noise:
-          Math.max(0, log.noise - hadNoise) + (reaction === "noise" ? 1 : 0),
-        reaction,
-      };
-    });
-
-    saveProofLogs(nextLogs);
-    setProofLogs(nextLogs);
+      setIsSigningIn(false);
+      setSignInError(
+        code === "auth/popup-closed-by-user"
+          ? "Google sign-in was closed before completion."
+          : error instanceof Error
+            ? error.message
+            : "Google sign-in could not be completed.",
+      );
+    }
   }
 
-  function handleReset() {
-    clearArenaState();
+  function handleSubmitProof() {
+    return;
+  }
+
+  function handleReactToProof() {
+    return;
+  }
+
+  async function handleSignOut() {
     setArenaState(null);
     setWalletAddress("");
     setSelectedRole("player");
     setSelectedCityId(cities[0].id);
     setLocationMessage("");
-    clearProofLogs();
     setProofLogs([]);
     setStep("intro");
     setActiveTab("arena");
+    await Promise.all([
+      signOutFromFirebase(firebaseAuth),
+      fetch("/api/auth/firebase/session", { method: "DELETE" }),
+    ]);
+    window.location.assign("/");
   }
 
   return (
@@ -267,13 +344,30 @@ export function ArenaApp() {
             </p>
           </div>
           <nav className="flex items-center gap-2">
-            {arenaState?.firstSignalClaimed ? (
+            {viewer ? (
               <>
                 <HeaderButton onClick={() => setActiveTab("map")}>Map</HeaderButton>
                 <HeaderButton onClick={() => setActiveTab("feed")}>Feed</HeaderButton>
                 <HeaderButton onClick={() => setActiveTab("signal")}>
                   My Signal
                 </HeaderButton>
+                <button
+                  aria-label="Sign out"
+                  className="grid h-9 w-9 place-items-center overflow-hidden rounded-full border border-zinc-700 bg-zinc-900 text-xs font-bold text-white"
+                  onClick={handleSignOut}
+                  title={viewer.email}
+                  type="button"
+                >
+                  {viewer.image ? (
+                    <img
+                      alt=""
+                      className="h-full w-full object-cover"
+                      src={viewer.image}
+                    />
+                  ) : (
+                    viewer.name.slice(0, 1).toUpperCase()
+                  )}
+                </button>
               </>
             ) : (
               <button
@@ -297,12 +391,12 @@ export function ArenaApp() {
               {step !== "intro" && step !== "done" ? (
                 <OnboardingOverlay onClose={() => setStep("intro")}>
                   <ArenaOnboarding
-                    isClaiming={isClaiming}
+                    authReady={authReady}
+                    isSigningIn={isSigningIn}
                     isFindingArena={isFindingArena}
                     locationMessage={locationMessage}
-                    onClaim={handleClaim}
-                    onConnectWallet={handleConnectWallet}
                     onFindArena={handleFindArena}
+                    onGoogleSignIn={handleGoogleSignIn}
                     onSelectCity={handleManualCitySelect}
                     onSelectRole={(role) => {
                       setSelectedRole(role);
@@ -313,7 +407,8 @@ export function ArenaApp() {
                     selectedCityId={selectedCityId}
                     selectedRole={selectedRole}
                     step={step}
-                    walletAddress={walletAddress}
+                    signInError={signInError}
+                    viewer={viewer}
                   />
                 </OnboardingOverlay>
               ) : null}
@@ -341,17 +436,17 @@ export function ArenaApp() {
 
           {activeTab === "signal" ? (
             <MySignal
-              arenaState={arenaState}
-              onReset={handleReset}
+              onReset={handleSignOut}
               selectedCityName={selectedCity.name}
               selectedRole={selectedRole}
               walletAddress={walletAddress}
               proofCount={proofLogs.length}
+              viewer={viewer}
             />
           ) : null}
         </section>
 
-        {arenaState?.firstSignalClaimed ? (
+        {viewer ? (
           <BottomTabs activeTab={activeTab} onChange={setActiveTab} />
         ) : null}
       </div>
@@ -507,12 +602,12 @@ function HeaderButton({
 }
 
 function ArenaOnboarding({
-  isClaiming,
+  authReady,
+  isSigningIn,
   isFindingArena,
   locationMessage,
-  onClaim,
-  onConnectWallet,
   onFindArena,
+  onGoogleSignIn,
   onSelectCity,
   onSelectRole,
   onStart,
@@ -520,14 +615,15 @@ function ArenaOnboarding({
   selectedCityId,
   selectedRole,
   step,
-  walletAddress,
+  signInError,
+  viewer,
 }: {
-  isClaiming: boolean;
+  authReady: boolean;
+  isSigningIn: boolean;
   isFindingArena: boolean;
   locationMessage: string;
-  onClaim: () => void;
-  onConnectWallet: () => void;
   onFindArena: () => void;
+  onGoogleSignIn: () => Promise<void>;
   onSelectCity: (cityId: string) => void;
   onSelectRole: (role: ArenaRole) => void;
   onStart: () => void;
@@ -535,7 +631,8 @@ function ArenaOnboarding({
   selectedCityId: string;
   selectedRole: ArenaRole;
   step: OnboardingStep;
-  walletAddress: string;
+  signInError: string;
+  viewer: AuthViewer | null;
 }) {
   return (
     <div className="flex min-h-[620px] flex-col px-5 py-6">
@@ -671,47 +768,49 @@ function ArenaOnboarding({
         </StepFrame>
       ) : null}
 
-      {step === "wallet" ? (
+      {step === "account" ? (
         <StepFrame
-          eyebrow="Wallet"
-          title="Your wallet is your seat."
-          body="Connect once. Your Genesis record is attached to this address."
+          eyebrow="Account signal"
+          title={viewer ? "Your account is verified." : "Secure your place."}
+          body={
+            viewer
+              ? "Your Google account is now the private recovery layer for the Signal ID. Wallet linking comes next."
+              : "Google sign-in prevents duplicate accounts and gives you a way to recover your Signal ID. Your email is never shown in the public feed."
+          }
         >
-          <button
-            className="mt-10 h-13 rounded-md bg-white px-5 text-sm font-semibold text-black transition hover:bg-zinc-200"
-            onClick={onConnectWallet}
-            type="button"
-          >
-            {walletAddress ? "Wallet Connected" : "Connect Wallet"}
-          </button>
-        </StepFrame>
-      ) : null}
-
-      {step === "claim" ? (
-        <StepFrame
-          eyebrow="First Signal"
-          title="Claim your Genesis seat."
-          body={`First ${campaignStats.walletCap.toLocaleString()} wallets receive the entry signal.`}
-        >
-          <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-            <p className="text-xs uppercase tracking-[0.22em] text-sky-300">
-              Entry reward
+          {viewer ? (
+            <div className="mt-8 rounded-lg border border-[#7ee0bd]/20 bg-[#7ee0bd]/10 p-5">
+              <p className="text-sm font-semibold text-white">{viewer.name}</p>
+              <p className="mt-1 text-sm text-zinc-400">{viewer.email}</p>
+              <p className="mt-4 text-xs uppercase tracking-[0.2em] text-[#a7f3d8]">
+                Account stored in the registry
+              </p>
+            </div>
+          ) : (
+            <button
+              className="mt-10 h-13 rounded-md bg-white px-5 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
+              disabled={!authReady || isSigningIn}
+              onClick={onGoogleSignIn}
+              type="button"
+            >
+              {isSigningIn
+                ? "Securing your Signal ID..."
+                : authReady
+                  ? "Continue with Google"
+                  : "Google sign-in setup pending"}
+            </button>
+          )}
+          {signInError ? (
+            <p className="mt-4 rounded-md border border-red-400/20 bg-red-400/10 p-4 text-sm leading-6 text-red-100">
+              {signInError}
             </p>
-            <p className="mt-3 text-5xl font-semibold text-white">
-              {campaignStats.rewardPerWallet}
-              <span className="ml-2 text-lg font-medium text-sky-300">
-                JXRO
-              </span>
+          ) : null}
+          {!authReady ? (
+            <p className="mt-4 rounded-md border border-amber-400/20 bg-amber-400/10 p-4 text-sm leading-6 text-amber-100">
+              Firebase is connected. Add PostgreSQL to Railway to activate
+              account storage and sign-in.
             </p>
-          </div>
-          <button
-            className="mt-5 h-13 rounded-md bg-white px-5 text-sm font-semibold text-black transition hover:bg-zinc-200"
-            disabled={isClaiming}
-            onClick={onClaim}
-            type="button"
-          >
-            {isClaiming ? "Claiming..." : "Claim First Signal"}
-          </button>
+          ) : null}
         </StepFrame>
       ) : null}
 
@@ -1169,18 +1268,18 @@ function ProofLogCard({
 }
 
 function MySignal({
-  arenaState,
   onReset,
   proofCount,
   selectedCityName,
   selectedRole,
+  viewer,
   walletAddress,
 }: {
-  arenaState: ArenaState | null;
   onReset: () => void;
   proofCount: number;
   selectedCityName: string;
   selectedRole: ArenaRole;
+  viewer: AuthViewer | null;
   walletAddress: string;
 }) {
   return (
@@ -1190,11 +1289,11 @@ function MySignal({
           My Signal
         </p>
         <h1 className="mt-3 max-w-3xl text-4xl font-semibold leading-tight text-white">
-          {arenaState ? "Your Genesis signal is active." : "No signal yet."}
+          {viewer ? "Your account signal is active." : "No signal yet."}
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
-          Role, city, reward state, and live proof history stay attached to
-          one Signal ID.
+          Your private account will connect role, city, wallet, reward state,
+          and live proof history to one Signal ID.
         </p>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
@@ -1203,9 +1302,9 @@ function MySignal({
               Signal ID
             </p>
             <div className="mt-5 rounded-2xl border border-zinc-800 bg-black/40 p-5">
-              <p className="text-sm text-zinc-500">Wallet</p>
-              <p className="mt-2 break-all text-2xl font-semibold text-white">
-                {walletAddress ? shortenAddress(walletAddress) : "Not connected"}
+              <p className="text-sm text-zinc-500">Account</p>
+              <p className="mt-2 break-all text-xl font-semibold text-white">
+                {viewer?.email ?? "Not signed in"}
               </p>
             </div>
 
@@ -1213,8 +1312,8 @@ function MySignal({
               <SignalRow label="Role" value={roleOptions[selectedRole].title} />
               <SignalRow label="City" value={selectedCityName} />
               <SignalRow
-                label="First Signal"
-                value={arenaState ? "100 JXRO claimed" : "Not claimed"}
+                label="Wallet"
+                value={walletAddress ? shortenAddress(walletAddress) : "Not connected"}
               />
               <SignalRow label="Live Proofs" value={String(proofCount)} />
             </div>
@@ -1226,13 +1325,12 @@ function MySignal({
                 Genesis reward
               </p>
               <p className="mt-4 text-5xl font-semibold text-white">
-                {arenaState ? "100" : "0"}
+                0
                 <span className="ml-2 text-lg text-[#a7f3d8]">JXRO</span>
               </p>
               <p className="mt-3 text-sm leading-6 text-zinc-300">
-                {arenaState
-                  ? "This allocation is ready to be linked to the token distribution layer."
-                  : "Claim First Signal to prepare your entry allocation."}
+                No mock allocation is shown. Claim eligibility will appear here
+                after a real wallet is verified.
               </p>
             </div>
 
@@ -1254,7 +1352,7 @@ function MySignal({
           onClick={onReset}
           type="button"
         >
-          Clear this device
+          Sign out
         </button>
       </div>
     </div>
