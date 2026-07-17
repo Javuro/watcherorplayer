@@ -14,6 +14,7 @@ import {
 import { firebaseAuth } from "@/lib/firebase-client";
 import { type ArenaRole, campaignStats, cities } from "./campaign";
 import { MapLibreSignalGlobe } from "./components/maplibre-signal-globe";
+import { ExternalWalletCard } from "./components/external-wallet-card";
 import {
   type ArenaState,
   type ProofLog,
@@ -206,7 +207,9 @@ export function ArenaApp({
   );
 
   const stepIndex = Math.max(0, stepOrder.indexOf(step));
-  const progress = Math.round((stepIndex / (stepOrder.length - 1)) * 100);
+  const progress = walletAddress
+    ? 100
+    : Math.round((stepIndex / (stepOrder.length - 1)) * 100);
 
   function goToStep(nextStep: OnboardingStep) {
     setStep(nextStep);
@@ -397,6 +400,7 @@ export function ArenaApp({
                     locationMessage={locationMessage}
                     onFindArena={handleFindArena}
                     onGoogleSignIn={handleGoogleSignIn}
+                    onWalletChange={setWalletAddress}
                     onSelectCity={handleManualCitySelect}
                     onSelectRole={(role) => {
                       setSelectedRole(role);
@@ -436,6 +440,7 @@ export function ArenaApp({
 
           {activeTab === "signal" ? (
             <MySignal
+              onWalletChange={setWalletAddress}
               onReset={handleSignOut}
               selectedCityName={selectedCity.name}
               selectedRole={selectedRole}
@@ -608,6 +613,7 @@ function ArenaOnboarding({
   locationMessage,
   onFindArena,
   onGoogleSignIn,
+  onWalletChange,
   onSelectCity,
   onSelectRole,
   onStart,
@@ -624,6 +630,7 @@ function ArenaOnboarding({
   locationMessage: string;
   onFindArena: () => void;
   onGoogleSignIn: () => Promise<void>;
+  onWalletChange: (address: string) => void;
   onSelectCity: (cityId: string) => void;
   onSelectRole: (role: ArenaRole) => void;
   onStart: () => void;
@@ -774,18 +781,21 @@ function ArenaOnboarding({
           title={viewer ? "Your account is verified." : "Secure your place."}
           body={
             viewer
-              ? "Your Google account is now the private recovery layer for the Signal ID. Wallet linking comes next."
+              ? "Your Google account is the private recovery layer for this Signal ID. Connect an external wallet to verify ownership and receive Genesis JXRO."
               : "Google sign-in prevents duplicate accounts and gives you a way to recover your Signal ID. Your email is never shown in the public feed."
           }
         >
           {viewer ? (
-            <div className="mt-8 rounded-lg border border-[#7ee0bd]/20 bg-[#7ee0bd]/10 p-5">
-              <p className="text-sm font-semibold text-white">{viewer.name}</p>
-              <p className="mt-1 text-sm text-zinc-400">{viewer.email}</p>
-              <p className="mt-4 text-xs uppercase tracking-[0.2em] text-[#a7f3d8]">
-                Account stored in the registry
-              </p>
-            </div>
+            <>
+              <div className="mt-8 rounded-lg border border-[#7ee0bd]/20 bg-[#7ee0bd]/10 p-5">
+                <p className="text-sm font-semibold text-white">{viewer.name}</p>
+                <p className="mt-1 text-sm text-zinc-400">{viewer.email}</p>
+                <p className="mt-4 text-xs uppercase tracking-[0.2em] text-[#a7f3d8]">
+                  Account stored in the registry
+                </p>
+              </div>
+              <ExternalWalletCard onWalletChange={onWalletChange} />
+            </>
           ) : (
             <button
               className="mt-10 h-13 rounded-md bg-white px-5 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
@@ -1268,6 +1278,7 @@ function ProofLogCard({
 }
 
 function MySignal({
+  onWalletChange,
   onReset,
   proofCount,
   selectedCityName,
@@ -1275,6 +1286,7 @@ function MySignal({
   viewer,
   walletAddress,
 }: {
+  onWalletChange: (address: string) => void;
   onReset: () => void;
   proofCount: number;
   selectedCityName: string;
@@ -1320,19 +1332,7 @@ function MySignal({
           </section>
 
           <aside className="space-y-4">
-            <div className="rounded-3xl border border-[#7ee0bd]/20 bg-[#7ee0bd]/10 p-5">
-              <p className="text-xs uppercase tracking-[0.24em] text-[#a7f3d8]">
-                Genesis reward
-              </p>
-              <p className="mt-4 text-5xl font-semibold text-white">
-                0
-                <span className="ml-2 text-lg text-[#a7f3d8]">JXRO</span>
-              </p>
-              <p className="mt-3 text-sm leading-6 text-zinc-300">
-                No mock allocation is shown. Claim eligibility will appear here
-                after a real wallet is verified.
-              </p>
-            </div>
+            <ExternalWalletCard compact onWalletChange={onWalletChange} />
 
             <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
               <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">

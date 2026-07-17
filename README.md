@@ -6,7 +6,7 @@ The project starts as a Genesis Claim and participation loop, not as the full JA
 
 ## V1 Scope
 
-- Connect or create a wallet.
+- Connect an external wallet.
 - Choose a city.
 - Choose a role: Watcher or Player.
 - Claim the First Signal reward.
@@ -24,9 +24,12 @@ The project starts as a Genesis Claim and participation loop, not as the full JA
 - Admin-only account registry at `/admin`.
 - Database models for users, wallets, claims, proofs, and reactions.
 - City and role selection UI.
+- BNB Chain external-wallet connection with signed ownership verification.
+- Genesis transfer endpoint with account and wallet duplicate protection.
 - Automatic removal of the previous browser-only mock state.
 
-Wallet linking, image storage, and token transfers are intentionally not active yet.
+Image storage is intentionally not active yet. Token transfers remain locked until
+the Reward Wallet, JXRO contract, RPC, and `JXRO_CLAIMS_ENABLED=true` are configured.
 The interface never creates a fake wallet or fake transaction hash.
 
 ## Local Setup
@@ -36,6 +39,10 @@ Copy `.env.example` to `.env.local`, then provide:
 - `DATABASE_URL`: Railway PostgreSQL connection string.
 - `ADMIN_EMAILS`: comma-separated Google accounts allowed to open `/admin`.
 - `NEXT_PUBLIC_FIREBASE_*`: Firebase web app configuration values.
+- `BSC_RPC_URL`: production BNB Smart Chain RPC endpoint.
+- `JXRO_TOKEN_ADDRESS` and `JXRO_TOKEN_DECIMALS`: verified BEP-20 contract metadata.
+- `JXRO_REWARD_PRIVATE_KEY`: campaign-sized Reward Wallet signer, never treasury.
+- `JXRO_CLAIMS_ENABLED`: keep `false` until transfer dry-run verification passes.
 
 Apply the schema and start the app:
 
@@ -75,7 +82,7 @@ Later expansion:
 
 ```text
 Enter Arena
--> Connect/Create Wallet
+-> Connect External Wallet
 -> Choose City
 -> Choose Watcher or Player
 -> Claim First Signal
@@ -93,7 +100,7 @@ Enter Arena
 - App session: hashed opaque session tokens in PostgreSQL.
 - Database: Railway PostgreSQL with Prisma.
 - Image storage: Cloudflare R2 or an S3-compatible service.
-- Wallets and Web3 UX: wagmi, viem, and RainbowKit.
+- Wallet verification: injected EVM wallets and viem.
 - Chain: BNB Smart Chain.
 - Token: JXRO BEP-20.
 - V1 distribution: backend-verified Reward Wallet transfers.
@@ -115,8 +122,8 @@ The Map tab uses MapLibre GL JS with globe projection and a keyless OpenFreeMap 
 
 1. Add Railway PostgreSQL and Firebase environment variables.
 2. Link Railway PostgreSQL and run `npm run db:deploy`.
-3. Add BNB Chain wallet connection and signed ownership verification.
+3. Add BNB Chain wallet connection and signed ownership verification. (Complete)
 4. Save role and city selections to the authenticated user record.
 5. Add R2 image upload and database-backed Signal feed.
 6. Add the claim ledger and admin approval flow.
-7. Add Reward Wallet transfers on BNB Chain after dry-run verification.
+7. Configure and activate Reward Wallet transfers after dry-run verification.

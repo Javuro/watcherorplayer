@@ -265,7 +265,7 @@ export default async function AdminPage() {
                   </DataSection>
 
                   <DataSection title={`Claims (${user.claims.length})`}>
-                    <DataTable headers={["Campaign", "Amount", "Status", "Wallet", "Transaction", "Created", "Paid"]}>
+                    <DataTable headers={["Campaign", "Amount", "Status", "Wallet", "Transaction", "Created", "Submitted", "Paid", "Failure"]}>
                       {user.claims.map((claim) => (
                         <tr className="border-t border-zinc-900" key={claim.id}>
                           <DataCell>{claim.campaignKey}</DataCell>
@@ -274,10 +274,12 @@ export default async function AdminPage() {
                           <DataCell mono>{claim.wallet.address}</DataCell>
                           <DataCell mono>{claim.transactionHash ?? "-"}</DataCell>
                           <DataCell>{formatDate(claim.createdAt)}</DataCell>
+                          <DataCell>{formatOptionalDate(claim.submittedAt)}</DataCell>
                           <DataCell>{formatOptionalDate(claim.paidAt)}</DataCell>
+                          <DataCell>{claim.failureReason ?? "-"}</DataCell>
                         </tr>
                       ))}
-                      <EmptyDataRow colSpan={7} show={!user.claims.length} />
+                      <EmptyDataRow colSpan={9} show={!user.claims.length} />
                     </DataTable>
                   </DataSection>
 

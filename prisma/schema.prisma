@@ -14,8 +14,10 @@ enum ArenaRole {
 
 enum ClaimStatus {
   PENDING
-  APPROVED
+  PROCESSING
+  SUBMITTED
   PAID
+  FAILED
   REJECTED
 }
 
@@ -32,23 +34,24 @@ enum ReactionKind {
 }
 
 model User {
-  id            String     @id @default(cuid())
-  firebaseUid   String     @unique
-  authProvider  String     @default("firebase")
-  name          String?
-  email         String?    @unique
-  emailVerified DateTime?
-  image         String?
-  role          ArenaRole?
-  cityName      String?
-  countryCode   String?
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-  sessions      Session[]
-  wallets       Wallet[]
-  claims        Claim[]
-  proofs        Proof[]
-  reactions     Reaction[]
+  id               String            @id @default(cuid())
+  firebaseUid      String            @unique
+  authProvider     String            @default("firebase")
+  name             String?
+  email            String?           @unique
+  emailVerified    DateTime?
+  image            String?
+  role             ArenaRole?
+  cityName         String?
+  countryCode      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  sessions         Session[]
+  wallets          Wallet[]
+  claims           Claim[]
+  walletChallenges WalletChallenge[]
+  proofs           Proof[]
+  reactions        Reaction[]
 }
 
 model Session {
@@ -78,6 +81,21 @@ model Wallet {
   @@index([userId])
 }
 
+model WalletChallenge {
+  id        String    @id @default(cuid())
+  userId    String
+  address   String
+  chainId   Int       @default(56)
+  message   String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, address, expiresAt])
+  @@index([expiresAt])
+}
+
 model Claim {
   id              String      @id @default(cuid())
   campaignKey     String
@@ -86,14 +104,16 @@ model Claim {
   userId          String
   walletId        String
   transactionHash String?     @unique
-  reviewedAt      DateTime?
+  submittedAt     DateTime?
   paidAt          DateTime?
+  failureReason   String?
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   wallet          Wallet      @relation(fields: [walletId], references: [id], onDelete: Restrict)
 
   @@unique([campaignKey, walletId])
+  @@unique([campaignKey, userId])
   @@index([status, createdAt])
   @@index([userId])
 }
