@@ -1,7 +1,14 @@
 "use client";
 
+import {
+  useAppKit,
+  useAppKitAccount,
+  useAppKitNetwork,
+  useAppKitProvider,
+} from "@reown/appkit/react";
+import { bsc } from "@reown/appkit/networks";
 import { useCallback, useEffect, useState } from "react";
-import { bscChainIdHex } from "@/lib/wallet-config";
+import { isAppKitConfigured } from "./appkit-context";
 
 type ClaimState = {
   amount: string;
@@ -23,15 +30,9 @@ type WalletSnapshot = {
   wallet: WalletState | null;
 };
 
-type EthereumProvider = {
+type WalletProvider = {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
 };
-
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
-  }
-}
 
 export function ExternalWalletCard({
   compact = false,
@@ -40,6 +41,12 @@ export function ExternalWalletCard({
   compact?: boolean;
   onWalletChange: (address: string) => void;
 }) {
+  const { open } = useAppKit();
+  const { address: connectedAddress, isConnected } = useAppKitAccount({
+    namespace: "eip155",
+  });
+  const { chainId, switchNetwork } = useAppKitNetwork();
+  const { walletProvider } = useAppKitProvider<WalletProvider>("eip155");
   const [snapshot, setSnapshot] = useState<WalletSnapshot | null>(null);
   const [isWorking, setIsWorking] = useState(false);
   const [error, setError] = useState("");
@@ -62,13 +69,20 @@ export function ExternalWalletCard({
     return () => window.clearTimeout(refreshTimer);
   }, [refresh]);
 
-  async function connectAndVerify() {
-    const provider = window.ethereum;
+  async function openWalletPicker() {
+    setError("");
 
-    if (!provider) {
-      setError(
-        "No external wallet was found. Open this page in MetaMask or Trust Wallet, or install a compatible browser wallet.",
-      );
+    if (!isAppKitConfigured) {
+      setError("Wallet connection is being configured. Please try again shortly.");
+      return;
+    }
+
+    await open({ namespace: "eip155", view: "Connect" });
+  }
+
+  async function verifyConnectedWallet() {
+    if (!connectedAddress || !isConnected || !walletProvider) {
+      await openWalletPicker();
       return;
     }
 
@@ -76,16 +90,12 @@ export function ExternalWalletCard({
     setError("");
 
     try {
-      const accounts = (await provider.request({ method: "eth_requestAccounts" })) as string[];
-      const address = accounts[0];
-
-      if (!address) {
-        throw new Error("No wallet account was selected.");
+      if (Number(chainId) !== bsc.id) {
+        await switchNetwork(bsc);
       }
 
-      await ensureBscNetwork(provider);
       const challengeResponse = await fetch("/api/wallet", {
-        body: JSON.stringify({ address }),
+        body: JSON.stringify({ address: connectedAddress }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
@@ -99,13 +109,13 @@ export function ExternalWalletCard({
         throw new Error(challenge?.error ?? "Wallet verification could not start.");
       }
 
-      const signature = (await provider.request({
+      const signature = (await walletProvider.request({
         method: "personal_sign",
-        params: [challenge.message, address],
+        params: [challenge.message, connectedAddress],
       })) as string;
       const verifyResponse = await fetch("/api/wallet/verify", {
         body: JSON.stringify({
-          address,
+          address: connectedAddress,
           challengeId: challenge.challengeId,
           signature,
         }),
@@ -189,7 +199,7 @@ export function ExternalWalletCard({
         </p>
       ) : (
         <p className="mt-3 text-xs leading-5 text-zinc-500">
-          Connect MetaMask, Trust Wallet, or another compatible external wallet. Signing is free and cannot move funds.
+          Connect by QR or use MetaMask, Trust Wallet, Binance Wallet, or SafePal. Signing is free and cannot move funds.
         </p>
       )}
 
@@ -199,10 +209,14 @@ export function ExternalWalletCard({
         <button
           className="mt-5 h-11 w-full rounded-md bg-[#7ee0bd] px-4 text-sm font-bold text-[#07100d] disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
           disabled={isWorking}
-          onClick={connectAndVerify}
+          onClick={isConnected && connectedAddress ? verifyConnectedWallet : openWalletPicker}
           type="button"
         >
-          {isWorking ? "Verify in wallet..." : "Connect external wallet"}
+          {isWorking
+            ? "Verify in wallet..."
+            : isConnected && connectedAddress
+              ? "Verify wallet & receive"
+              : "Connect wallet"}
         </button>
       ) : canClaim ? (
         <button
@@ -271,34 +285,6 @@ async function getWalletSnapshot() {
   }
 
   return payload;
-}
-
-async function ensureBscNetwork(provider: EthereumProvider) {
-  try {
-    await provider.request({
-      method: "wallet_switchEthereumChain",
-      params: [{ chainId: bscChainIdHex }],
-    });
-  } catch (error) {
-    const code = getProviderErrorCode(error);
-
-    if (code !== 4902) {
-      throw error;
-    }
-
-    await provider.request({
-      method: "wallet_addEthereumChain",
-      params: [
-        {
-          blockExplorerUrls: ["https://bscscan.com"],
-          chainId: bscChainIdHex,
-          chainName: "BNB Smart Chain",
-          nativeCurrency: { decimals: 18, name: "BNB", symbol: "BNB" },
-          rpcUrls: ["https://bsc-dataseed.bnbchain.org"],
-        },
-      ],
-    });
-  }
 }
 
 function getProviderErrorCode(error: unknown) {

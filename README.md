@@ -39,6 +39,7 @@ Copy `.env.example` to `.env.local`, then provide:
 - `DATABASE_URL`: Railway PostgreSQL connection string.
 - `ADMIN_EMAILS`: comma-separated Google accounts allowed to open `/admin`.
 - `NEXT_PUBLIC_FIREBASE_*`: Firebase web app configuration values.
+- `NEXT_PUBLIC_REOWN_PROJECT_ID`: Reown AppKit project for external wallet discovery and QR connections.
 - `BSC_RPC_URL`: production BNB Smart Chain RPC endpoint.
 - `JXRO_TOKEN_ADDRESS` and `JXRO_TOKEN_DECIMALS`: verified BEP-20 contract metadata.
 - `JXRO_REWARD_PRIVATE_KEY`: campaign-sized Reward Wallet signer, never treasury.
@@ -100,7 +101,8 @@ Enter Arena
 - App session: hashed opaque session tokens in PostgreSQL.
 - Database: Railway PostgreSQL with Prisma.
 - Image storage: Cloudflare R2 or an S3-compatible service.
-- Wallet verification: injected EVM wallets and viem.
+- Wallet discovery: Reown AppKit with the Ethers adapter.
+- Wallet verification: viem on the server with an expiring, single-use message challenge.
 - Chain: BNB Smart Chain.
 - Token: JXRO BEP-20.
 - V1 distribution: backend-verified Reward Wallet transfers.

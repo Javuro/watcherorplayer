@@ -1,7 +1,6 @@
 import { getAddress, isAddress } from "viem";
 
 export const bscChainId = 56;
-export const bscChainIdHex = "0x38";
 export const genesisCampaignKey =
   process.env.JXRO_CAMPAIGN_KEY ?? "first-signal-2026";
 export const genesisRewardAmount =
