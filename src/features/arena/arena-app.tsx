@@ -120,7 +120,18 @@ export function ArenaApp({
   const [locationMessage, setLocationMessage] = useState("");
   const [proofLogs, setProofLogs] = useState<ProofLog[]>([]);
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [showRedirectSignIn, setShowRedirectSignIn] = useState(false);
   const [signInError, setSignInError] = useState("");
+  const signInFallbackTimerRef = useRef<number | null>(null);
+
+  function clearSignInFallbackTimer() {
+    if (signInFallbackTimerRef.current !== null) {
+      window.clearTimeout(signInFallbackTimerRef.current);
+      signInFallbackTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => clearSignInFallbackTimer, []);
 
   useEffect(() => {
     if (!authReady || viewer) {
@@ -282,12 +293,19 @@ export function ArenaApp({
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
     setIsSigningIn(true);
+    setShowRedirectSignIn(false);
     setSignInError("");
+    clearSignInFallbackTimer();
+    signInFallbackTimerRef.current = window.setTimeout(() => {
+      setShowRedirectSignIn(true);
+    }, 6_000);
 
     try {
       const result = await signInWithPopup(firebaseAuth, provider);
+      clearSignInFallbackTimer();
       await establishServerSession(result.user, returnUrl);
     } catch (error: unknown) {
+      clearSignInFallbackTimer();
       const code = getFirebaseErrorCode(error);
 
       if (
@@ -300,12 +318,40 @@ export function ArenaApp({
       }
 
       setIsSigningIn(false);
+      setShowRedirectSignIn(false);
       setSignInError(
         code === "auth/popup-closed-by-user"
           ? "Google sign-in was closed before completion."
           : error instanceof Error
             ? error.message
             : "Google sign-in could not be completed.",
+      );
+    }
+  }
+
+  async function handleGoogleRedirectSignIn() {
+    if (!authReady) {
+      return;
+    }
+
+    const returnUrl = `/?continue=account&role=${selectedRole}&city=${selectedCityId}`;
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    clearSignInFallbackTimer();
+    setIsSigningIn(true);
+    setShowRedirectSignIn(false);
+    setSignInError("");
+    window.sessionStorage.setItem(firebaseReturnUrlKey, returnUrl);
+
+    try {
+      await signInWithRedirect(firebaseAuth, provider);
+    } catch (error: unknown) {
+      setIsSigningIn(false);
+      setShowRedirectSignIn(true);
+      setSignInError(
+        error instanceof Error
+          ? error.message
+          : "Google sign-in could not be completed.",
       );
     }
   }
@@ -400,6 +446,7 @@ export function ArenaApp({
                     locationMessage={locationMessage}
                     onFindArena={handleFindArena}
                     onGoogleSignIn={handleGoogleSignIn}
+                    onGoogleRedirectSignIn={handleGoogleRedirectSignIn}
                     onWalletChange={setWalletAddress}
                     onSelectCity={handleManualCitySelect}
                     onSelectRole={(role) => {
@@ -412,6 +459,7 @@ export function ArenaApp({
                     selectedRole={selectedRole}
                     step={step}
                     signInError={signInError}
+                    showRedirectSignIn={showRedirectSignIn}
                     viewer={viewer}
                   />
                 </OnboardingOverlay>
@@ -613,6 +661,7 @@ function ArenaOnboarding({
   locationMessage,
   onFindArena,
   onGoogleSignIn,
+  onGoogleRedirectSignIn,
   onWalletChange,
   onSelectCity,
   onSelectRole,
@@ -622,6 +671,7 @@ function ArenaOnboarding({
   selectedRole,
   step,
   signInError,
+  showRedirectSignIn,
   viewer,
 }: {
   authReady: boolean;
@@ -630,6 +680,7 @@ function ArenaOnboarding({
   locationMessage: string;
   onFindArena: () => void;
   onGoogleSignIn: () => Promise<void>;
+  onGoogleRedirectSignIn: () => Promise<void>;
   onWalletChange: (address: string) => void;
   onSelectCity: (cityId: string) => void;
   onSelectRole: (role: ArenaRole) => void;
@@ -639,6 +690,7 @@ function ArenaOnboarding({
   selectedRole: ArenaRole;
   step: OnboardingStep;
   signInError: string;
+  showRedirectSignIn: boolean;
   viewer: AuthViewer | null;
 }) {
   return (
@@ -797,18 +849,35 @@ function ArenaOnboarding({
               <ExternalWalletCard onWalletChange={onWalletChange} />
             </>
           ) : (
-            <button
-              className="mt-10 h-13 rounded-md bg-white px-5 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
-              disabled={!authReady || isSigningIn}
-              onClick={onGoogleSignIn}
-              type="button"
-            >
-              {isSigningIn
-                ? "Securing your Signal ID..."
-                : authReady
-                  ? "Continue with Google"
-                  : "Google sign-in setup pending"}
-            </button>
+            <div className="mt-10 grid gap-3">
+              <button
+                className="h-13 rounded-md bg-white px-5 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
+                disabled={!authReady || isSigningIn}
+                onClick={onGoogleSignIn}
+                type="button"
+              >
+                {isSigningIn
+                  ? "Securing your Signal ID..."
+                  : authReady
+                    ? "Continue with Google"
+                    : "Google sign-in setup pending"}
+              </button>
+              {showRedirectSignIn ? (
+                <div className="rounded-md border border-zinc-800 bg-zinc-950 p-4">
+                  <p className="text-sm leading-6 text-zinc-400">
+                    If the account window did not open, continue with a
+                    full-page sign-in.
+                  </p>
+                  <button
+                    className="mt-3 h-11 w-full rounded-md border border-[#7ee0bd]/40 bg-[#7ee0bd]/10 px-4 text-sm font-semibold text-[#a7f3d8] transition hover:bg-[#7ee0bd]/15"
+                    onClick={onGoogleRedirectSignIn}
+                    type="button"
+                  >
+                    Continue in this browser
+                  </button>
+                </div>
+              ) : null}
+            </div>
           )}
           {signInError ? (
             <p className="mt-4 rounded-md border border-red-400/20 bg-red-400/10 p-4 text-sm leading-6 text-red-100">
