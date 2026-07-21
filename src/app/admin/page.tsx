@@ -8,6 +8,10 @@ import {
 } from "@/lib/auth-config";
 import { getCurrentViewer } from "@/lib/firebase-session";
 import { prisma } from "@/lib/prisma";
+import {
+  getRewardWalletStatus,
+  type RewardWalletStatus,
+} from "@/lib/reward-wallet-status";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +52,7 @@ export default async function AdminPage() {
     proofCount,
     reactionCount,
     activeSessionCount,
+    rewardWalletStatus,
   ] = await Promise.all([
     prisma.user.findMany({
       include: {
@@ -84,6 +89,7 @@ export default async function AdminPage() {
     prisma.proof.count(),
     prisma.reaction.count(),
     prisma.session.count({ where: { expires: { gt: now } } }),
+    getRewardWalletStatus(),
   ]);
 
   return (
@@ -118,6 +124,8 @@ export default async function AdminPage() {
           <Metric label="Proofs" value={proofCount} />
           <Metric label="Reactions" value={reactionCount} />
         </section>
+
+        <RewardWalletPanel status={rewardWalletStatus} />
 
         <section className="mt-6 overflow-hidden rounded-md border border-zinc-800 bg-[#0b0b0c]">
           <div className="border-b border-zinc-800 px-5 py-4">
@@ -328,6 +336,62 @@ export default async function AdminPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+function RewardWalletPanel({ status }: { status: RewardWalletStatus }) {
+  const state = status.ready
+    ? status.claimsEnabled
+      ? "Live"
+      : "Ready to enable"
+    : "Locked";
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-md border border-zinc-800 bg-[#0b0b0c]">
+      <div className="flex flex-col justify-between gap-3 border-b border-zinc-800 px-5 py-4 sm:flex-row sm:items-center">
+        <div>
+          <h2 className="text-sm font-semibold text-white">Reward Wallet</h2>
+          <p className="mt-1 text-xs text-zinc-500">
+            Read-only BNB Chain readiness check. Private keys are never displayed.
+          </p>
+        </div>
+        <span
+          className={`text-xs font-semibold uppercase tracking-[0.18em] ${
+            status.ready ? "text-[#7ee0bd]" : "text-amber-300"
+          }`}
+        >
+          {state}
+        </span>
+      </div>
+      <RecordGrid
+        values={[
+          ["Claims enabled", status.claimsEnabled ? "Yes" : "No"],
+          ["RPC", status.rpcConfigured ? "Configured" : "Required"],
+          ["Token contract", status.tokenAddress ?? (status.tokenConfigured ? "Invalid" : "Required")],
+          ["Signer", status.signerConfigured ? "Configured" : "Required"],
+          ["Reward wallet", status.rewardWalletAddress],
+          ["Chain ID", status.chainId],
+          ["BNB balance", status.nativeBalance],
+          [
+            "Token balance",
+            status.tokenBalance && status.tokenSymbol
+              ? `${status.tokenBalance} ${status.tokenSymbol}`
+              : null,
+          ],
+          ["On-chain decimals", status.tokenDecimals],
+          ["Configured decimals", status.configuredDecimals],
+          [
+            "Decimals match",
+            status.decimalsMatch == null
+              ? null
+              : status.decimalsMatch
+                ? "Yes"
+                : "No - transfers blocked",
+          ],
+          ["Check result", status.error ?? (status.ready ? "Ready" : "Funding or configuration required")],
+        ]}
+      />
+    </section>
   );
 }
 

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   createPublicClient,
   createWalletClient,
+  erc20Abi,
   getAddress,
   http,
   parseUnits,
@@ -80,7 +81,7 @@ export async function POST(request: NextRequest) {
     }),
   ]);
 
-  if (existingClaim) {
+  if (existingClaim && existingClaim.status !== "FAILED") {
     return NextResponse.json({ claim: serializeClaim(existingClaim) });
   }
 
@@ -100,54 +101,66 @@ export async function POST(request: NextRequest) {
 
   let claim;
 
-  try {
-    claim = await prisma.$transaction(
-      async (transaction) => {
-        const allocatedCount = await transaction.claim.count({
-          where: {
-            campaignKey: genesisCampaignKey,
-            status: { notIn: ["FAILED", "REJECTED"] },
-          },
-        });
-
-        if (allocatedCount >= genesisWalletCap) {
-          throw new Error("GENESIS_CAP_REACHED");
-        }
-
-        return transaction.claim.create({
-          data: {
-            amount: genesisRewardAmount,
-            campaignKey: genesisCampaignKey,
-            status: "PROCESSING",
-            userId: viewer.id,
-            walletId: wallet.id,
-          },
-        });
+  if (existingClaim?.status === "FAILED") {
+    claim = await prisma.claim.update({
+      data: {
+        failureReason: null,
+        status: "PROCESSING",
+        submittedAt: null,
+        transactionHash: null,
       },
-      { isolationLevel: "Serializable" },
-    );
-  } catch (error) {
-    if (error instanceof Error && error.message === "GENESIS_CAP_REACHED") {
-      return NextResponse.json(
-        { error: "The Genesis wallet cap has been reached." },
-        { status: 409 },
-      );
-    }
-
-    const duplicate = await prisma.claim.findUnique({
-      where: {
-        campaignKey_userId: {
-          campaignKey: genesisCampaignKey,
-          userId: viewer.id,
-        },
-      },
+      where: { id: existingClaim.id },
     });
+  } else {
+    try {
+      claim = await prisma.$transaction(
+        async (transaction) => {
+          const allocatedCount = await transaction.claim.count({
+            where: {
+              campaignKey: genesisCampaignKey,
+              status: { notIn: ["FAILED", "REJECTED"] },
+            },
+          });
 
-    if (duplicate) {
-      return NextResponse.json({ claim: serializeClaim(duplicate) });
+          if (allocatedCount >= genesisWalletCap) {
+            throw new Error("GENESIS_CAP_REACHED");
+          }
+
+          return transaction.claim.create({
+            data: {
+              amount: genesisRewardAmount,
+              campaignKey: genesisCampaignKey,
+              status: "PROCESSING",
+              userId: viewer.id,
+              walletId: wallet.id,
+            },
+          });
+        },
+        { isolationLevel: "Serializable" },
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message === "GENESIS_CAP_REACHED") {
+        return NextResponse.json(
+          { error: "The Genesis wallet cap has been reached." },
+          { status: 409 },
+        );
+      }
+
+      const duplicate = await prisma.claim.findUnique({
+        where: {
+          campaignKey_userId: {
+            campaignKey: genesisCampaignKey,
+            userId: viewer.id,
+          },
+        },
+      });
+
+      if (duplicate) {
+        return NextResponse.json({ claim: serializeClaim(duplicate) });
+      }
+
+      throw new Error("The Genesis allocation could not be reserved.");
     }
-
-    throw new Error("The Genesis allocation could not be reserved.");
   }
 
   const { decimals, privateKey, rpcUrl, tokenAddress } = transferConfig;
@@ -157,6 +170,25 @@ export async function POST(request: NextRequest) {
   let transactionHash: Hex | null = null;
 
   try {
+    const [chainId, onchainDecimals] = await Promise.all([
+      publicClient.getChainId(),
+      publicClient.readContract({
+        abi: erc20Abi,
+        address: tokenAddress,
+        functionName: "decimals",
+      }),
+    ]);
+
+    if (chainId !== bsc.id) {
+      throw new Error(`RPC returned chain ${chainId}; expected BNB Smart Chain.`);
+    }
+
+    if (onchainDecimals !== decimals) {
+      throw new Error(
+        `Token decimals mismatch: configured ${decimals}, on-chain ${onchainDecimals}.`,
+      );
+    }
+
     const simulation = await publicClient.simulateContract({
       abi: erc20TransferAbi,
       account,

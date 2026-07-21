@@ -45,6 +45,11 @@ Copy `.env.example` to `.env.local`, then provide:
 - `JXRO_REWARD_PRIVATE_KEY`: campaign-sized Reward Wallet signer, never treasury.
 - `JXRO_CLAIMS_ENABLED`: keep `false` until transfer dry-run verification passes.
 
+The admin registry includes a read-only Reward Wallet readiness check for the
+BNB Chain ID, signer address, BNB gas balance, JXRO balance, and token decimals.
+Failed claims without a submitted transaction can be retried after an operator
+fixes the funding or configuration issue.
+
 Apply the schema and start the app:
 
 ```bash
